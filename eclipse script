@@ -1,0 +1,590 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local UIS = UserInputService
+local CoreGui = game:GetService("CoreGui")
+local HttpService = game:GetService("HttpService")
+
+local LP = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+local gameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+
+-- Obfuscated Firebase Credentials
+local _j = function(...) return table.concat({...}) end
+local FB_URL = _j("https://","eclipse-hub","-default-rtdb",".firebaseio",".com/")
+local FB_KEY = _j("JCGGdYgX","CQgI6fnS","e4ft6UQd","oGevZlnJ","K0JPRCNI")
+local FB = {
+    Get = function(self, path)
+        local ok, res = pcall(function() return HttpService:RequestAsync({Url = FB_URL .. path .. ".json?auth=" .. FB_KEY, Method = "GET"}) end)
+        if ok and res.Success then return true, HttpService:JSONDecode(res.Body) end
+        return false, nil
+    end,
+    Put = function(self, path, data)
+        pcall(function() HttpService:RequestAsync({Url = FB_URL .. path .. ".json?auth=" .. FB_KEY, Method = "PUT", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(data)}) end)
+    end,
+    Post = function(self, path, data)
+        pcall(function() HttpService:RequestAsync({Url = FB_URL .. path .. ".json?auth=" .. FB_KEY, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(data)}) end)
+    end
+}
+
+local validKeys = {}
+pcall(function()
+    local ok, dbKeys = FB:Get("keys")
+    if ok and type(dbKeys) == "table" then
+        for k, v in pairs(dbKeys) do
+            -- Eger veritabani {"KEY": true} veya {"KEY": {durum}} seklindeyse anahtar(k) string'dir
+            if type(k) == "string" then 
+                table.insert(validKeys, k) 
+            end
+            -- Eger veritabani ["KEY1", "KEY2"] seklinde bir liste ise deger(v) string'dir
+            if type(v) == "string" then 
+                table.insert(validKeys, v) 
+            end
+        end
+    end
+end)
+
+local Window = Rayfield:CreateWindow({
+    Name = "ECLIPSE",
+    Keybind = Enum.KeyCode.Insert,
+    Icon = 0,
+    LoadingTitle = "ECLIPSE",
+    LoadingSubtitle = "ECLIPSE ROBLOX",
+    Theme = "Default",
+    DisableRayfieldPrompts = false,
+    DisableBuildWarnings = true,
+    ConfigurationSaving = { Enabled = true, FolderName = "ECLIPSE", FileName = "EclipseConfig" },
+    KeySystem = false,
+    KeySettings = {
+        Title = "ECLIPSE VIP",
+        Subtitle = "Key Sistemi",
+        Note = "t.me/radikalkarar",
+        FileName = "EclipseLiteKey",
+        SaveKey = true,
+        GrabKeyFromSite = false,
+        Key = validKeys
+    }
+})
+
+task.spawn(function()
+    pcall(function()
+        local now = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        local uid = "user_" .. tostring(LP.UserId)
+        local ok, existing = FB:Get("users/" .. uid)
+        FB:Put("users/" .. uid, { username = LP.Name, lastLogin = now, firstLogin = (existing and existing.firstLogin) or now, totalLogins = (existing and existing.totalLogins or 0) + 1, executor = identifyexecutor and identifyexecutor() or "Bilinmiyor", game = gameName })
+    end)
+end)
+
+local Conns = {}
+local function addC(n, c) if Conns[n] then Conns[n]:Disconnect() end; Conns[n] = c end
+local function remC(n) if Conns[n] then Conns[n]:Disconnect(); Conns[n] = nil end end
+local function getChar(p) return p and p.Character end
+local function getHum(p) local c = getChar(p); return c and c:FindFirstChildOfClass("Humanoid") end
+local function getRoot(p) local c = getChar(p); return c and (c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso")) end
+local function isAlive(p) local h = getHum(p); return h and h.Health > 0 end
+
+local S = {
+    aimbot=false, aimbotMode="Sag Tik", aimSmoothness=10, silentAim=false,
+    aimFOV=120, hitChance=100, hitPart="Head", prediction=0, resolver=false, wallbang=false, fovCircle=false,
+    fovFillColor=Color3.fromRGB(139,92,246), fovFillTrans=0.2,
+    triggerbot=false, triggerbotDelay=0.1,
+    worldFov=false, worldFovValue=70, vmFov=false, vmX=0, vmY=0, vmZ=0,
+    silentAimTarget = nil, magicBullet=false,
+    
+    fly=false, flySpeed=50, spinbot=false, spinbotSpeed=50,
+    
+    espBoxes=false, espNames=false, espHealth=false, espTracers=false, espTracerOrigin="Bottom", espSkeletons=false,
+    espTracerThick=1, espTracerTrans=1,
+    espColor=Color3.fromRGB(139,92,246), espDistance=false, espChams=false, espChamVisColor=Color3.fromRGB(0,255,0)
+}
+
+local espObjs = {}
+local function cleanESP(p)
+    if espObjs[p] then
+        for _, v in pairs(espObjs[p]) do if typeof(v) == "Instance" then v:Destroy() elseif v.Remove then v:Remove() end end
+        espObjs[p] = nil
+    end
+end
+
+-- ===========================
+-- TAB 1: COMBAT
+-- ===========================
+local CombatTab = Window:CreateTab("Combat", "crosshair")
+
+CombatTab:CreateSection("Aimbot")
+CombatTab:CreateToggle({Name = "Aimbot (Camera)", CurrentValue = false, Flag = "AimbotCam", Callback = function(v) S.aimbot = v end})
+CombatTab:CreateDropdown({Name = "Aimbot Modu", Options = {"Sag Tik", "Her Zaman (Mobil)"}, CurrentOption = {"Sag Tik"}, Flag = "AimbotMode", Callback = function(v) S.aimbotMode = v[1] end})
+CombatTab:CreateSlider({Name = "Aimbot Smoothness (Puruzsuzluk)", Range = {1, 100}, Increment = 1, Suffix = "%", CurrentValue = 10, Flag = "AimSmooth", Callback = function(v) S.aimSmoothness = v end})
+CombatTab:CreateToggle({Name = "Silent Aim", CurrentValue = false, Flag = "SilentAim", Callback = function(v) S.silentAim = v end})
+
+CombatTab:CreateSection("Ayarlar")
+CombatTab:CreateSlider({Name = "FOV Yaricapi", Range = {30, 500}, Increment = 5, Suffix = "px", CurrentValue = 120, Flag = "AimFOV", Callback = function(v) S.aimFOV = v end})
+CombatTab:CreateSlider({Name = "Isabet Sansi", Range = {0, 100}, Increment = 5, Suffix = "%", CurrentValue = 100, Flag = "HitChance", Callback = function(v) S.hitChance = v end})
+CombatTab:CreateDropdown({Name = "Hedef Bolge", Options = {"Head", "HumanoidRootPart", "Torso", "UpperTorso", "Random"}, CurrentOption = {"Head"}, Flag = "HitPart", Callback = function(v) S.hitPart = v[1] end})
+CombatTab:CreateSlider({Name = "Prediction", Range = {0, 100}, Increment = 5, Suffix = "%", CurrentValue = 0, Flag = "Prediction", Callback = function(v) S.prediction = v end})
+CombatTab:CreateToggle({Name = "Resolver", CurrentValue = false, Flag = "Resolver", Callback = function(v) S.resolver = v end})
+CombatTab:CreateToggle({Name = "Auto Wallbang (Aimbot Duvar Arkasi Kilitlenir)", CurrentValue = false, Flag = "Wallbang", Callback = function(v) S.wallbang = v end})
+CombatTab:CreateToggle({Name = "Magic Bullet (Mermiler Duvardan Gecer)", CurrentValue = false, Flag = "MagicBullet", Callback = function(v) S.magicBullet = v end})
+CombatTab:CreateToggle({Name = "FOV Dairesi", CurrentValue = false, Flag = "FOVCircle", Callback = function(v)
+    S.fovCircle = v
+    if Drawing then
+        pcall(function()
+            if not _G._EclFOV then
+                _G._EclFOV = Drawing.new("Circle")
+                _G._EclFOV.Thickness = 1
+                _G._EclFOV.Filled = false
+                _G._EclFOV.Transparency = 1
+            end
+            if not _G._EclFOV_Fill then
+                _G._EclFOV_Fill = Drawing.new("Circle")
+                _G._EclFOV_Fill.Thickness = 0
+                _G._EclFOV_Fill.Filled = true
+            end
+            _G._EclFOV.Visible = v
+            _G._EclFOV_Fill.Visible = v
+            if v then
+                addC("fov", RunService.RenderStepped:Connect(function()
+                    local mp = UIS:GetMouseLocation()
+                    _G._EclFOV.Position = mp
+                    _G._EclFOV.Radius = S.aimFOV
+                    _G._EclFOV.Color = S.espColor
+                    _G._EclFOV_Fill.Position = mp
+                    _G._EclFOV_Fill.Radius = S.aimFOV
+                    _G._EclFOV_Fill.Color = S.fovFillColor
+                    _G._EclFOV_Fill.Transparency = S.fovFillTrans
+                end))
+            else remC("fov") end
+        end)
+    end
+end})
+CombatTab:CreateColorPicker({Name = "Aim / FOV Cizgi Rengi", Color = Color3.fromRGB(139, 92, 246), Flag = "AimClr", Callback = function(v) S.espColor = v end})
+CombatTab:CreateColorPicker({Name = "FOV Doldurma Rengi", Color = Color3.fromRGB(139, 92, 246), Flag = "FovFillClr", Callback = function(v) S.fovFillColor = v end})
+CombatTab:CreateSlider({Name = "FOV İçi Saydamlık", Range = {0, 100}, Increment = 5, Suffix = "%", CurrentValue = 20, Flag = "FovFillT", Callback = function(v) S.fovFillTrans = v/100 end})
+
+CombatTab:CreateSection("Triggerbot")
+CombatTab:CreateToggle({Name = "Triggerbot", CurrentValue = false, Flag = "Triggerbot", Callback = function(v)
+    S.triggerbot = v
+    if v then
+        addC("trigger", RunService.RenderStepped:Connect(function()
+            local target = LP:GetMouse().Target
+            if target then
+                local model = target:FindFirstAncestorOfClass("Model")
+                if model then
+                    local p = Players:GetPlayerFromCharacter(model)
+                    if p and p ~= LP and isAlive(p) then
+                        task.wait(S.triggerbotDelay)
+                        mouse1click()
+                    end
+                end
+            end
+        end))
+    else remC("trigger") end
+end})
+CombatTab:CreateSlider({Name = "Triggerbot Gecikme", Range = {0, 1}, Increment = 0.01, Suffix = "s", CurrentValue = 0.1, Flag = "TrigDelay", Callback = function(v) S.triggerbotDelay = v end})
+
+-- ===========================
+-- TAB 2: VISUALS
+-- ===========================
+local VisTab = Window:CreateTab("Visuals", "eye")
+VisTab:CreateSection("ESP")
+VisTab:CreateToggle({Name = "ESP Boxes", CurrentValue = false, Flag = "ESPBox", Callback = function(v) S.espBoxes = v end})
+VisTab:CreateToggle({Name = "ESP Names", CurrentValue = false, Flag = "ESPName", Callback = function(v) S.espNames = v end})
+VisTab:CreateToggle({Name = "ESP Mesafe Goster", CurrentValue = false, Flag = "ESPDist", Callback = function(v) S.espDistance = v end})
+VisTab:CreateToggle({Name = "ESP Health", CurrentValue = false, Flag = "ESPHp", Callback = function(v) S.espHealth = v end})
+VisTab:CreateToggle({Name = "ESP Tracers", CurrentValue = false, Flag = "ESPTracers", Callback = function(v) S.espTracers = v end})
+VisTab:CreateDropdown({Name = "Tracer Baslangici", Options = {"Bottom", "Center", "Mouse"}, CurrentOption = {"Bottom"}, Flag = "ESPTracerOrig", Callback = function(v) S.espTracerOrigin = v[1] end})
+VisTab:CreateSlider({Name = "Tracer Kalinligi", Range = {1, 10}, Increment = 1, Suffix = "px", CurrentValue = 1, Flag = "ESPTracerThick", Callback = function(v) S.espTracerThick = v end})
+VisTab:CreateSlider({Name = "Tracer Saydamligi (Gorunurluk)", Range = {0, 100}, Increment = 5, Suffix = "%", CurrentValue = 100, Flag = "ESPTracerTrans", Callback = function(v) S.espTracerTrans = v/100 end})
+VisTab:CreateToggle({Name = "ESP Skeleton", CurrentValue = false, Flag = "ESPSkeleton", Callback = function(v) S.espSkeletons = v end})
+VisTab:CreateToggle({Name = "ESP Chams", CurrentValue = false, Flag = "ESPChams", Callback = function(v) S.espChams = v end})
+VisTab:CreateColorPicker({Name = "ESP / Duvar Arkasi Chams Rengi", Color = Color3.fromRGB(139, 92, 246), Flag = "ESPClr", Callback = function(v) S.espColor = v end})
+VisTab:CreateColorPicker({Name = "Chams Görünür Rengi (Onunde)", Color = Color3.fromRGB(0, 255, 0), Flag = "ESPVisClr", Callback = function(v) S.espChamVisColor = v end})
+
+-- ===========================
+-- TAB 3: MOVEMENT
+-- ===========================
+local MovTab = Window:CreateTab("Movement", "activity")
+local flyBV, flyBG
+
+local function disableFly()
+    remC("flyLoop")
+    if flyBV then flyBV:Destroy(); flyBV = nil end
+    if flyBG then flyBG:Destroy(); flyBG = nil end
+end
+
+MovTab:CreateSection("Fly")
+MovTab:CreateToggle({Name = "Uçma (Fly)", CurrentValue = false, Flag = "Fly", Callback = function(v)
+    S.fly = v
+    if v then
+        local root = getRoot(LP)
+        if root then
+            flyBV = Instance.new("BodyVelocity")
+            flyBV.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            flyBV.Velocity = Vector3.zero
+            flyBV.Parent = root
+            flyBG = Instance.new("BodyGyro")
+            flyBG.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+            flyBG.P = 9e4
+            flyBG.CFrame = root.CFrame
+            flyBG.Parent = root
+            
+            addC("flyLoop", RunService.RenderStepped:Connect(function()
+                local char = getChar(LP)
+                local r = char and char:FindFirstChild("HumanoidRootPart")
+                local h = char and char:FindFirstChildOfClass("Humanoid")
+                if r and h and flyBV and flyBG then
+                    local camCF = Camera.CFrame
+                    local moveDir = Vector3.zero
+                    if UIS:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camCF.LookVector end
+                    if UIS:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camCF.LookVector end
+                    if UIS:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camCF.RightVector end
+                    if UIS:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camCF.RightVector end
+                    if UIS:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+                    if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+                    
+                    if moveDir.Magnitude > 0 then
+                        flyBV.Velocity = moveDir.Unit * S.flySpeed
+                    else
+                        flyBV.Velocity = Vector3.zero
+                    end
+                    flyBG.CFrame = CFrame.new(r.Position, r.Position + camCF.LookVector)
+                else
+                    disableFly()
+                end
+            end))
+        end
+    else
+        disableFly()
+    end
+end})
+MovTab:CreateSlider({Name = "Fly Hizli", Range = {10, 500}, Increment = 5, Suffix = "", CurrentValue = 50, Flag = "FlySpeed", Callback = function(v) S.flySpeed = v end})
+
+MovTab:CreateSection("Mevlana (Spinbot)")
+MovTab:CreateToggle({Name = "Spinbot", CurrentValue = false, Flag = "Spinbot", Callback = function(v)
+    S.spinbot = v
+    if v then
+        addC("spinLoop", RunService.RenderStepped:Connect(function(dt)
+            local root = getRoot(LP)
+            if root and not S.fly then
+                root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(S.spinbotSpeed * dt * 10), 0)
+            end
+        end))
+    else
+        remC("spinLoop")
+    end
+end})
+MovTab:CreateSlider({Name = "Spinbot Hizli", Range = {10, 500}, Increment = 10, Suffix = "", CurrentValue = 100, Flag = "SpinSpeed", Callback = function(v) S.spinbotSpeed = v end})
+
+-- ===========================
+-- TAB 4: BYPASS & SETTINGS
+-- ===========================
+local SetTab = Window:CreateTab("Settings", "settings")
+SetTab:CreateSection("Bypass / Gizlilik")
+SetTab:CreateToggle({Name = "OBS Bypass (Gizle)", CurrentValue = false, Flag = "OBS", Callback = function(v)
+    pcall(function()
+        if gethui then
+            local targets = {}
+            for _, gui in ipairs(CoreGui:GetChildren()) do table.insert(targets, gui) end
+            for _, gui in ipairs(gethui():GetChildren()) do table.insert(targets, gui) end
+            
+            local found = false
+            for _, gui in ipairs(targets) do
+                if gui:IsA("ScreenGui") and (gui.Name == "Rayfield" or gui:FindFirstChild("Rayfield") or gui:FindFirstChild("Main", true)) then
+                    gui.Parent = v and gethui() or CoreGui
+                    found = true
+                end
+            end
+            if not found then
+                Rayfield:Notify({Title="Hata", Content="Arayuz bulunamadi, bypass uygulanamadi.", Duration=3})
+            end
+        else
+            Rayfield:Notify({Title="Bypass Hatasi", Content="Executor OBS Bypass desteklemiyor (gethui fonksiyonu eksik).", Duration=3})
+        end
+    end)
+end})
+
+SetTab:CreateSection("Menu Ayarlari")
+SetTab:CreateParagraph({Title = "ECLIPSE v2.5", Content = "Combat, ESP & Bypass (Ultra Hafif)\nInsert tusu ile menuyu gizle/goster."})
+SetTab:CreateButton({Name = "Kapat", Callback = function()
+    for n in pairs(Conns) do remC(n) end
+    for p in pairs(espObjs) do cleanESP(p) end
+    if _G._EclFOV then _G._EclFOV:Remove() end
+    if _G._EclFOV_Fill then _G._EclFOV_Fill:Remove() end
+    Rayfield:Destroy()
+end})
+
+Rayfield:LoadConfiguration()
+
+-- ===========================
+-- LOGIC INITIALIZATION
+-- ===========================
+
+local function createESP(p)
+    if p == LP or espObjs[p] then return end
+    local d = {}
+    if Drawing then
+        pcall(function()
+            d.box = Drawing.new("Square"); d.box.Thickness = 1; d.box.Filled = false
+            d.nameT = Drawing.new("Text"); d.nameT.Size = 16; d.nameT.Center = true; d.nameT.Outline = true; d.nameT.Color = Color3.new(1,1,1)
+            d.hpT = Drawing.new("Text"); d.hpT.Size = 14; d.hpT.Center = true; d.hpT.Outline = true
+            d.trc = Drawing.new("Line"); d.trc.Thickness = 1
+            d.hpBarBg = Drawing.new("Line"); d.hpBarBg.Thickness = 3; d.hpBarBg.Color = Color3.new(0,0,0)
+            d.hpBar = Drawing.new("Line"); d.hpBar.Thickness = 1
+            d.bones = {}
+            for i=1,15 do local l = Drawing.new("Line"); l.Thickness = 1; table.insert(d.bones, l) end
+        end)
+    end
+    espObjs[p] = d
+end
+
+pcall(function()
+    for _, p in ipairs(Players:GetPlayers()) do createESP(p) end
+    Players.PlayerAdded:Connect(createESP)
+    Players.PlayerRemoving:Connect(cleanESP)
+end)
+
+local bonePairsR15 = { {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"}, {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"}, {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"}, {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"}, {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"} }
+local bonePairsR6 = { {"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"}, {"Torso", "Left Leg"}, {"Torso", "Right Leg"} }
+
+addC("espLoop", RunService.RenderStepped:Connect(function()
+    pcall(function()
+        for p, d in pairs(espObjs) do
+            if not p or not p.Parent then cleanESP(p); continue end
+            local char = getChar(p)
+            local root = char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso"))
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if root and hum and hum.Health > 0 then
+                local pos, vis = Camera:WorldToViewportPoint(root.Position)
+                if vis then
+                    local head = char:FindFirstChild("Head")
+                    local topPos = head and head.Position + Vector3.new(0, 0.5, 0) or root.Position + Vector3.new(0, 2, 0)
+                    local bottomPos = root.Position - Vector3.new(0, 3, 0)
+                    local top, _ = Camera:WorldToViewportPoint(topPos)
+                    local bottom, _ = Camera:WorldToViewportPoint(bottomPos)
+                    local bh = math.abs(top.Y - bottom.Y)
+                    local bw = bh * 0.6
+
+                    if S.espBoxes and d.box then
+                        d.box.Position = Vector2.new(pos.X - bw/2, pos.Y - bh/2); d.box.Size = Vector2.new(bw, bh)
+                        d.box.Color = S.espColor; d.box.Visible = true
+                    elseif d.box then d.box.Visible = false end
+
+                    if S.espNames and d.nameT then
+                        local txt = p.DisplayName
+                        if S.espDistance then txt = txt .. " [" .. math.floor((LP.Character and LP.Character.PrimaryPart and (root.Position - LP.Character.PrimaryPart.Position).Magnitude) or 0) .. "m]" end
+                        d.nameT.Text = txt; d.nameT.Position = Vector2.new(pos.X, pos.Y - bh/2 - 16); d.nameT.Visible = true
+                    elseif d.nameT then d.nameT.Visible = false end
+
+                    if S.espHealth and d.hpT then
+                        local hpPct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
+                        d.hpT.Text = math.floor(hum.Health); d.hpT.Position = Vector2.new(pos.X, pos.Y + bh/2 + 3)
+                        d.hpT.Color = Color3.fromRGB(255 * (1 - hpPct), 255 * hpPct, 0); d.hpT.Visible = true
+                        local barX = pos.X - bw/2 - 5
+                        d.hpBarBg.From = Vector2.new(barX, pos.Y - bh/2); d.hpBarBg.To = Vector2.new(barX, pos.Y + bh/2); d.hpBarBg.Visible = true
+                        d.hpBar.From = Vector2.new(barX, pos.Y + bh/2); d.hpBar.To = Vector2.new(barX, pos.Y + bh/2 - (bh * hpPct))
+                        d.hpBar.Color = Color3.fromRGB(255 * (1 - hpPct), 255 * hpPct, 0); d.hpBar.Visible = true
+                    elseif d.hpT then
+                        d.hpT.Visible = false; d.hpBarBg.Visible = false; d.hpBar.Visible = false
+                    end
+
+                    if S.espTracers and d.trc then
+                        local orig = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
+                        if S.espTracerOrigin == "Center" then orig = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+                        elseif S.espTracerOrigin == "Mouse" then orig = UIS:GetMouseLocation() end
+                        d.trc.From = orig; d.trc.To = Vector2.new(pos.X, pos.Y + bh/2)
+                        d.trc.Color = S.espColor
+                        d.trc.Thickness = S.espTracerThick
+                        d.trc.Transparency = S.espTracerTrans
+                        d.trc.Visible = true
+                    elseif d.trc then d.trc.Visible = false end
+
+                    if S.espSkeletons and d.bones then
+                        local isR15 = hum.RigType == Enum.HumanoidRigType.R15
+                        local pairs = isR15 and bonePairsR15 or bonePairsR6
+                        for i, b in ipairs(d.bones) do
+                            if pairs[i] then
+                                local p1 = char:FindFirstChild(pairs[i][1])
+                                local p2 = char:FindFirstChild(pairs[i][2])
+                                if p1 and p2 then
+                                    local pos1, v1 = Camera:WorldToViewportPoint(p1.Position)
+                                    local pos2, v2 = Camera:WorldToViewportPoint(p2.Position)
+                                    if v1 and v2 then
+                                        b.From = Vector2.new(pos1.X, pos1.Y); b.To = Vector2.new(pos2.X, pos2.Y)
+                                        b.Color = S.espColor; b.Visible = true
+                                    else b.Visible = false end
+                                else b.Visible = false end
+                            else b.Visible = false end
+                        end
+                    elseif d.bones then for _,b in ipairs(d.bones) do b.Visible = false end end
+                    
+                    if S.espChams then
+                        local isVis = false
+                        local params = RaycastParams.new()
+                        params.FilterType = Enum.RaycastFilterType.Exclude
+                        params.FilterDescendantsInstances = {LP.Character, Camera}
+                        local res = Workspace:Raycast(Camera.CFrame.Position, (root.Position - Camera.CFrame.Position).Unit * ((root.Position - Camera.CFrame.Position).Magnitude + 2), params)
+                        if res and res.Instance:IsDescendantOf(char) then isVis = true end
+                        
+                        if not char:FindFirstChild("_eclCham") then
+                            local hl = Instance.new("Highlight")
+                            hl.Name = "_eclCham"; hl.FillColor = isVis and S.espChamVisColor or S.espColor; hl.OutlineColor = Color3.new(1,1,1)
+                            hl.FillTransparency = 0.5; hl.OutlineTransparency = 0; hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                            hl.Parent = char
+                        else
+                            char._eclCham.FillColor = isVis and S.espChamVisColor or S.espColor
+                        end
+                    else
+                        if char:FindFirstChild("_eclCham") then char._eclCham:Destroy() end
+                    end
+                else
+                    if d.box then d.box.Visible = false; d.nameT.Visible = false; d.hpT.Visible = false; d.hpBarBg.Visible = false; d.hpBar.Visible = false; d.trc.Visible = false end
+                    if d.bones then for _,b in ipairs(d.bones) do b.Visible = false end end
+                    if char and char:FindFirstChild("_eclCham") then char._eclCham:Destroy() end
+                end
+            else
+                if d.box then d.box.Visible = false; d.nameT.Visible = false; d.hpT.Visible = false; d.hpBarBg.Visible = false; d.hpBar.Visible = false; d.trc.Visible = false end
+                if d.bones then for _,b in ipairs(d.bones) do b.Visible = false end end
+                if char and char:FindFirstChild("_eclCham") then char._eclCham:Destroy() end
+            end
+        end
+    end)
+end))
+
+local function getClosestPlayer()
+    local closest, closestDist = nil, S.aimFOV
+    local mp = UIS:GetMouseLocation()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and isAlive(p) then
+            local char = getChar(p)
+            local part = char and char:FindFirstChild(S.hitPart) or getRoot(p)
+            if char and part then
+                local pos, vis = Camera:WorldToViewportPoint(part.Position)
+                if vis then
+                    local d = (Vector2.new(pos.X, pos.Y) - mp).Magnitude
+                    if d < closestDist then
+                        if not S.wallbang then
+                            local params = RaycastParams.new()
+                            params.FilterType = Enum.RaycastFilterType.Exclude
+                            params.FilterDescendantsInstances = {LP.Character, Camera}
+                            local dir = (part.Position - Camera.CFrame.Position).Unit * ((part.Position - Camera.CFrame.Position).Magnitude + 2)
+                            local result = Workspace:Raycast(Camera.CFrame.Position, dir, params)
+                            if result and result.Instance:IsDescendantOf(char) then
+                                closest = p; closestDist = d
+                            end
+                        else
+                            closest = p; closestDist = d
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+addC("combatLoop", RunService.RenderStepped:Connect(function()
+    pcall(function()
+        if S.worldFov then Camera.FieldOfView = S.worldFovValue end
+        if S.vmFov then
+            for _, v in ipairs(Camera:GetChildren()) do
+                if v:IsA("Model") and (v.Name:lower():match("viewmodel") or v.Name:lower():match("arms") or v.Name:lower():match("camera")) then
+                    local root = v.PrimaryPart or v:FindFirstChild("HumanoidRootPart") or v:FindFirstChild("HumanoidRoot")
+                    if root then
+                        for _, motor in ipairs(v:GetDescendants()) do
+                            if motor:IsA("Motor6D") and motor.Part1 == root then
+                                motor.C0 = CFrame.new(S.vmX / 100, S.vmY / 100, S.vmZ / 100)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        S.silentAimTarget = nil
+        if S.silentAim then S.silentAimTarget = getClosestPlayer() end
+
+        if S.aimbot then
+            local target = getClosestPlayer()
+            if target then
+                local char = getChar(target)
+                local part = char and char:FindFirstChild(S.hitPart) or getRoot(target)
+                if part then
+                    local active = false
+                    if S.aimbotMode == "Her Zaman (Mobil)" then active = true
+                    elseif S.aimbotMode == "Sag Tik" and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then active = true end
+                    
+                    if active then
+                        local targetPos = part.Position
+                        local vel = part.AssemblyLinearVelocity or part.Velocity or Vector3.zero
+                        if S.prediction > 0 then targetPos = targetPos + (vel * (S.prediction / 100)) end
+                        if S.resolver then targetPos = Vector3.new(targetPos.X, part.Position.Y, targetPos.Z) end
+                        local targetCF = CFrame.new(Camera.CFrame.Position, targetPos)
+                        Camera.CFrame = Camera.CFrame:Lerp(targetCF, S.aimSmoothness / 100)
+                    end
+                end
+            end
+        end
+    end)
+end))
+
+pcall(function()
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+        if not checkcaller() then
+            local args = {...}
+            local method = getnamecallmethod()
+            
+            if S.silentAim and S.silentAimTarget and (method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRay" or method == "Raycast") then
+                local target = S.silentAimTarget
+                local char = getChar(target)
+                local part = char and (char:FindFirstChild(S.hitPart) or getRoot(target))
+                if part then
+                    if math.random(1, 100) <= S.hitChance then
+                        local targetPos = part.Position
+                        local vel = part.AssemblyLinearVelocity or part.Velocity or Vector3.zero
+                        if S.prediction > 0 then targetPos = targetPos + (vel * (S.prediction / 100)) end
+                        if S.resolver then targetPos = Vector3.new(targetPos.X, part.Position.Y, targetPos.Z) end
+                        
+                        if S.magicBullet then
+                            if method == "Raycast" then
+                                args[1] = targetPos + Vector3.new(0, 2, 0)
+                                args[2] = Vector3.new(0, -2, 0)
+                            elseif method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRay" then
+                                args[1] = Ray.new(targetPos + Vector3.new(0, 2, 0), Vector3.new(0, -2, 0))
+                            end
+                        else
+                            if method == "Raycast" then
+                                args[2] = (targetPos - args[1]).Unit * 1000
+                            elseif method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRay" then
+                                args[1] = Ray.new(args[1].Origin, (targetPos - args[1].Origin).Unit * 1000)
+                            end
+                        end
+                        return oldNamecall(self, unpack(args))
+                    end
+                end
+            end
+        end
+        return oldNamecall(self, ...)
+    end))
+
+    local oldIndex
+    oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
+        if not checkcaller() and S.silentAim and S.silentAimTarget and self == LP:GetMouse() and (key == "Hit" or key == "Target") then
+            local target = S.silentAimTarget
+            local char = getChar(target)
+            local part = char and (char:FindFirstChild(S.hitPart) or getRoot(target))
+            if part then
+                if math.random(1, 100) <= S.hitChance then
+                    if key == "Hit" then return part.CFrame end
+                    if key == "Target" then return part end
+                end
+            end
+        end
+        return oldIndex(self, key)
+    end))
+end)
+
+Rayfield:Notify({Title = "ECLIPSE", Content = "Gelistirilmis LITE v2.5 ndiYukle!", Duration = 5})
+print("[ECLIPSE] v2.5 LITE ENHANCED is loaded.")
